@@ -1,6 +1,7 @@
 #ifndef memcounter_ThreadMemoryCounterPool_h
 #define memcounter_ThreadMemoryCounterPool_h
 
+#include <cstring> // in case size_t isn't declared automatically
 #include <vector>
 
 // Forward declarations

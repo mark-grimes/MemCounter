@@ -41,7 +41,7 @@ namespace memcounter
 		virtual int maximumNumberOfAllocations();
 
 		//
-		// These methods are in addition to those from the ICoutingInterface interface
+		// These methods are in addition to those from the ICountingInterface interface
 		//
 		virtual void preAdd( void* pointer, size_t size );
 		virtual void postAdd( void* pointer, size_t size );
