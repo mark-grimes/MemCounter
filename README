@@ -9,6 +9,8 @@ profile particular parts of code. The speed overhead is quite small, but there i
 small memory overhead for EACH dynamic memory allocation in your program. So the overhead
 will be significant for a program with lots of small allocations, and small for a program
 with very few large allocations.
+
+Licence is whatever igprof's is. No warranty whatsoever.
 Any questions to Mark Grimes (mark.grimes@bristol.ac.uk).
 
 ------------------
@@ -25,7 +27,7 @@ is (from the project source directory):
 
 You can change the install prefix with
 
-	cmake -DCMAKE_INSTALL_PREFIX=/my/install/directory
+	cmake -DCMAKE_INSTALL_PREFIX=/my/install/directory ..
 
 when you invoke the cmake command. 
 
@@ -82,7 +84,9 @@ get the symbol do something like the following code:
 	}
 	
 You can have several IMemoryCounters running at any time, so you can create many with the
-createNewMemoryCounter symbol and have them analysing different parts of code.
+createNewMemoryCounter symbol and have them analysing different parts of code. You can
+switch them on and off at will, so you can have one for a particular class and switch it
+on just for any method calls and follow memory for the life of the object.
 
 ---------------------------
 -- Invoking the analyser --
