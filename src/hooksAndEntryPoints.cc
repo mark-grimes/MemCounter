@@ -6,12 +6,12 @@
 
 bool memcounter_globallyDisabled=true;
 
-using memcounter::IMemoryCounter;
-
-extern "C"
-{
-	VISIBLE IMemoryCounter* createNewMemoryCounter( void )
-	{
-		return memcounter::MemoryCounterManager::instance().createNewMemoryCounter();
-	}
-}
+//using memcounter::IMemoryCounter;
+//
+//extern "C"
+//{
+//	VISIBLE IMemoryCounter* createNewMemoryCounter( void )
+//	{
+//		return memcounter::MemoryCounterManager::instance().createNewMemoryCounter();
+//	}
+//}

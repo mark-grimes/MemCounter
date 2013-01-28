@@ -3,12 +3,14 @@
 
 #include <cstring> // in case size_t isn't declared automatically
 #include <vector>
+#include <list>
 
 // Forward declarations
 namespace memcounter
 {
 	class IMemoryCounter;
 	class ICountingInterface;
+	class IRecordingInterface;
 }
 
 namespace memcounter
@@ -28,8 +30,11 @@ namespace memcounter
 	public:
 		ThreadMemoryCounterPool();
 		virtual ~ThreadMemoryCounterPool();
-		memcounter::IMemoryCounter* createNewMemoryCounter();
 
+		//
+		// These methods deal with the registered ICountingInterfaces
+		//
+		memcounter::IMemoryCounter* createNewMemoryCounter();
 
 		void preAddToAllEnabledCounters( void* pointer, size_t size );
 		void postAddToAllEnabledCounters( void* pointer, size_t size );
@@ -40,9 +45,26 @@ namespace memcounter
 
 		void informEnabled( memcounter::ICountingInterface* pEnabledCounter );
 		void informDisabled( memcounter::ICountingInterface* pDisabledCounter );
+
+		//
+		// These methods deal with the registered IRecordingInterfaces
+		//
+		memcounter::IMemoryCounter* createNewMemoryRecorder();
+
+		void addToAllEnabledRecorders( size_t size );
+		void modifyAllEnabledRecorders( size_t oldSize, size_t newSize );
+		void removeFromAllEnabledRecorders( size_t size );
+
+		void informEnabled( memcounter::IRecordingInterface* pEnabledCounter );
+		void informDisabled( memcounter::IRecordingInterface* pDisabledCounter );
+
 	protected:
 		std::vector<memcounter::ICountingInterface*> createdCounters_;
+		// I'm having performance issues so currently only using the most recent counter
 		memcounter::ICountingInterface* pLastEnabledCounter_;
+
+		std::vector<memcounter::IRecordingInterface*> createdRecorders_;
+		std::list<memcounter::IRecordingInterface*> enabledRecorders_;
 	}; // end of the MemoryCounter class
 
 } // end of the memcounter namespace

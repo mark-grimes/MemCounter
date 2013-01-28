@@ -1,9 +1,8 @@
-#ifndef memcounter_TrackingMemoryCounter_h
-#define memcounter_TrackingMemoryCounter_h
+#ifndef memcounter_RecordingMemoryCounter_h
+#define memcounter_RecordingMemoryCounter_h
 
-#include "memcounter/ICountingInterface.h"
+#include "memcounter/IRecordingInterface.h"
 
-#include <list>
 
 // Forward declarations
 namespace memcounter
@@ -13,16 +12,16 @@ namespace memcounter
 
 namespace memcounter
 {
-	/** @brief Implementation of the IMemoryCounter interface
+	/** @brief Implementation of the IRecordingInterface interface.
 	 *
 	 * @author Mark Grimes (mark.grimes@bristol.ac.uk)
-	 * @date 01/Aug/2011
+	 * @date 21/Jan/2012
 	 */
-	class TrackingMemoryCounter : public memcounter::ICountingInterface
+	class RecordingMemoryCounter : public memcounter::IRecordingInterface
 	{
 	public:
-		TrackingMemoryCounter( memcounter::ThreadMemoryCounterPool& parent );
-		virtual ~TrackingMemoryCounter();
+		RecordingMemoryCounter( memcounter::ThreadMemoryCounterPool& parent );
+		virtual ~RecordingMemoryCounter();
 
 		//
 		// These methods are from the IMemoryCounter interface
@@ -43,15 +42,11 @@ namespace memcounter
 		//
 		// These methods are in addition to those from the ICoutingInterface interface
 		//
-		virtual void preAdd( void* pointer, size_t size );
-		virtual void postAdd( void* pointer, size_t size );
-		virtual void preModify( void* oldPointer, void* newPointer, size_t newSize );
-		virtual void postModify( void* oldPointer, void* newPointer, size_t newSize );
-		virtual void preRemove( void* pointer );
-		virtual void postRemove( void* pointer );
+		virtual void add( size_t size );
+		virtual void modify( size_t oldSize, size_t newSize );
+		virtual void remove( size_t size );
 	protected:
 		bool enabled_;
-		std::list< std::pair<void*,size_t> > memoryAllocationSizes_;
 		size_t currentSize_;
 		size_t maximumSize_;
 		int currentNumberOfAllocations_;

@@ -3,6 +3,7 @@
 
 #include <stddef.h> // needed for size_t
 
+
 // Forward declarations
 namespace memcounter
 {
@@ -37,5 +38,7 @@ namespace memcounter
 	}; // end of the MemoryCounterManager class
 
 } // end of the memcounter namespace
+
+
 
 #endif

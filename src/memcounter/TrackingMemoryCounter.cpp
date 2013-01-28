@@ -93,12 +93,12 @@ void memcounter::TrackingMemoryCounter::dumpContents( std::ostream& stream, cons
 	stream << prefix << "Running total of current size=" << currentSize_ << ", maximum size=" << maximumSize_ << std::endl;
 }
 
-int memcounter::TrackingMemoryCounter::currentSize()
+size_t memcounter::TrackingMemoryCounter::currentSize()
 {
 	return currentSize_;
 }
 
-int memcounter::TrackingMemoryCounter::maximumSize()
+size_t memcounter::TrackingMemoryCounter::maximumSize()
 {
 	return maximumSize_;
 }

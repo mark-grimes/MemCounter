@@ -35,8 +35,8 @@ namespace memcounter
 		virtual void resetMaximum();
 
 		virtual void dumpContents( std::ostream& stream=std::cout, const std::string& prefix=std::string() );
-		virtual int currentSize();
-		virtual int maximumSize();
+		virtual size_t currentSize();
+		virtual size_t maximumSize();
 		virtual int currentNumberOfAllocations();
 		virtual int maximumNumberOfAllocations();
 
@@ -51,8 +51,8 @@ namespace memcounter
 		virtual void postRemove( void* pointer );
 	protected:
 		bool enabled_;
-		int currentSize_;
-		int maximumSize_;
+		size_t currentSize_;
+		size_t maximumSize_;
 		int currentNumberOfAllocations_;
 		int maximumNumberOfAllocations_;
 		int pre_uordblks_;

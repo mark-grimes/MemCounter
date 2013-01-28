@@ -61,12 +61,12 @@ void memcounter::MallinfoMemoryCounter::dumpContents( std::ostream& stream, cons
 	stream << prefix << "Running total of current size=" << currentSize_ << ", maximum size=" << maximumSize_ << std::endl;
 }
 
-int memcounter::MallinfoMemoryCounter::currentSize()
+size_t memcounter::MallinfoMemoryCounter::currentSize()
 {
 	return currentSize_;
 }
 
-int memcounter::MallinfoMemoryCounter::maximumSize()
+size_t memcounter::MallinfoMemoryCounter::maximumSize()
 {
 	return maximumSize_;
 }

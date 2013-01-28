@@ -2,9 +2,11 @@
 
 #include "memcounter/TrackingMemoryCounter.h"
 #include "memcounter/MallinfoMemoryCounter.h"
-#include "hooksAndEntryPoints.h"
+#include "memcounter/RecordingMemoryCounter.h"
+#include "memcounter/DisablingFunctions.h"
 
 #include <iostream>
+#include <algorithm>
 
 memcounter::ThreadMemoryCounterPool::ThreadMemoryCounterPool() : pLastEnabledCounter_(NULL)
 {
@@ -80,7 +82,7 @@ void memcounter::ThreadMemoryCounterPool::postRemoveFromAllEnabledCounters( void
 void memcounter::ThreadMemoryCounterPool::informEnabled( memcounter::ICountingInterface* pEnabledCounter )
 {
 	pLastEnabledCounter_=pEnabledCounter;
-	enableThisThread();
+	memcounter::enableThisThread();
 }
 
 void memcounter::ThreadMemoryCounterPool::informDisabled( memcounter::ICountingInterface* pDisabledCounter )
@@ -88,6 +90,62 @@ void memcounter::ThreadMemoryCounterPool::informDisabled( memcounter::ICountingI
 	if( pLastEnabledCounter_==pDisabledCounter )
 	{
 		pLastEnabledCounter_=NULL;
-		disableThisThread();
+		memcounter::disableThisThread();
 	}
+}
+
+memcounter::IMemoryCounter* memcounter::ThreadMemoryCounterPool::createNewMemoryRecorder()
+{
+	memcounter::IRecordingInterface* pNewMemoryRecorder=new RecordingMemoryCounter(*this);
+	// Keep track of all the pointers so that I can delete them later. I'll also use this vector
+	// to run through all of the counters when e.g. addToAllEnabledCounters is called.
+	createdRecorders_.push_back(pNewMemoryRecorder);
+
+	return pNewMemoryRecorder;
+
+}
+
+void memcounter::ThreadMemoryCounterPool::addToAllEnabledRecorders( size_t size )
+{
+	for( std::list<memcounter::IRecordingInterface*>::iterator iRecorder=enabledRecorders_.begin(); iRecorder!=enabledRecorders_.end(); ++iRecorder )
+	{
+		(*iRecorder)->add( size );
+	}
+}
+
+void memcounter::ThreadMemoryCounterPool::modifyAllEnabledRecorders( size_t oldSize, size_t newSize )
+{
+	for( std::list<memcounter::IRecordingInterface*>::iterator iRecorder=enabledRecorders_.begin(); iRecorder!=enabledRecorders_.end(); ++iRecorder )
+	{
+		(*iRecorder)->modify( oldSize, newSize );
+	}
+}
+
+void memcounter::ThreadMemoryCounterPool::removeFromAllEnabledRecorders( size_t size )
+{
+	for( std::list<memcounter::IRecordingInterface*>::iterator iRecorder=enabledRecorders_.begin(); iRecorder!=enabledRecorders_.end(); ++iRecorder )
+	{
+		(*iRecorder)->remove( size );
+	}
+}
+
+void memcounter::ThreadMemoryCounterPool::informEnabled( memcounter::IRecordingInterface* pEnabledRecorder )
+{
+	// Make sure the recorder is not already in the list of enabled recorders
+	std::list<memcounter::IRecordingInterface*>::iterator iFindResult=std::find( enabledRecorders_.begin(), enabledRecorders_.end(), pEnabledRecorder );
+
+	// If it wasn't found, add it
+	if( iFindResult==enabledRecorders_.end() ) enabledRecorders_.push_back( pEnabledRecorder );
+	memcounter::enableThisThread();
+}
+
+void memcounter::ThreadMemoryCounterPool::informDisabled( memcounter::IRecordingInterface* pDisabledRecorder )
+{
+	// Try and find this recorder in the list
+	std::list<memcounter::IRecordingInterface*>::iterator iFindResult=std::find( enabledRecorders_.begin(), enabledRecorders_.end(), pDisabledRecorder );
+
+	// Erase it if it was found
+	if( iFindResult!=enabledRecorders_.end() ) enabledRecorders_.erase( iFindResult );
+
+	if( enabledRecorders_.empty() ) memcounter::disableThisThread();
 }

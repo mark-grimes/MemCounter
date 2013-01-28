@@ -4,20 +4,87 @@
 #include <pthread.h>
 #include <vector>
 
-#include "hooksAndEntryPoints.h"
 #include "memcounter/MutexSentry.h"
 #include "memcounter/IMemoryCounter.h"
 #include "memcounter/ThreadMemoryCounterPool.h"
+#include "memcounter/DisablingFunctions.h"
 
 #include <malloc.h>
 
+// The IgHook library
+#include <stddef.h>
+#include "macros.h"
+#include "hook.h"
+
+// These are the hook functions
+DUAL_HOOK(1, void *, domalloc, _main, _libc, (size_t n), (n), "malloc", 0, "libc.so.6")
+DUAL_HOOK(2, void *, docalloc, _main, _libc, (size_t n, size_t m), (n, m), "calloc", 0, "libc.so.6")
+DUAL_HOOK(2, void *, dorealloc, _main, _libc, (void *ptr, size_t n), (ptr, n), "realloc", 0, "libc.so.6")
+DUAL_HOOK(3, int, dopmemalign, _main, _libc, (void **ptr, size_t alignment, size_t size), (ptr, alignment, size), "posix_memalign", 0, "libc.so.6")
+DUAL_HOOK(2, void *, domemalign, _main, _libc, (size_t alignment, size_t size), (alignment, size), "memalign", 0, "libc.so.6")
+DUAL_HOOK(1, void *, dovalloc, _main, _libc, (size_t size), (size), "valloc", 0, "libc.so.6")
+DUAL_HOOK(1, void, dofree, _main, _libc, (void *ptr), (ptr), "free", 0, "libc.so.6")
+
+DUAL_HOOK(1, void, doexit, _main, _libc, (int code), (code), "exit", 0, "libc.so.6")
+DUAL_HOOK(1, void, doexit, _main2, _libc2, (int code), (code), "_exit", 0, "libc.so.6")
+DUAL_HOOK(2, int, dokill, _main, _libc, (pid_t pid, int sig), (pid, sig), "kill", 0, "libc.so.6")
+
+LIBHOOK(4, int, dopthread_create, _main, (pthread_t *thread, const pthread_attr_t *attr, void * (*start_routine)(void *), void *arg), (thread, attr, start_routine, arg), "pthread_create", 0, 0)
+LIBHOOK(4, int, dopthread_create, _pthread20, (pthread_t *thread, const pthread_attr_t *attr, void * (*start_routine)(void *), void *arg), (thread, attr, start_routine, arg), "pthread_create", "GLIBC_2.0", 0)
+LIBHOOK(4, int, dopthread_create, _pthread21, (pthread_t *thread, const pthread_attr_t *attr, void * (*start_routine)(void *), void *arg), (thread, attr, start_routine, arg), "pthread_create", "GLIBC_2.1", 0)
+
+// These are the implementations of the functions defined in DisablingFunctions.h
+// This is the extern from the disabling functions
 namespace // Use the unnamed namespace
 {
 	// If this key is non-zero for a given thread then the memory counting functions will just do
 	// the normal behaviour, i.e. pass the calls on to the real malloc etcetera without recording
 	// anything.
 	pthread_key_t memcounter_threadDisabled;
+}
+bool memcounter_globallyDisabled=false;
+void memcounter::enableThisThread()
+{
+	pthread_setspecific( memcounter_threadDisabled, 0 );
+}
 
+void memcounter::disableThisThread()
+{
+	pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
+}
+
+/*
+ * This is the main entry point for external applications to get access
+ * the MemCounter functionality. The following code is the sort of thing
+ * that should be used to call this function:
+ *
+ *
+ *	// Define the function pointer
+ *	using memcounter::IMemoryCounter;
+ *	IMemoryCounter* (*createNewMemoryCounter)( void );
+ *	if( void *sym = dlsym(0, "createNewMemoryCounter") )
+ *	{
+ *		// Set the function pointer
+ *		createNewMemoryCounter = __extension__(IMemoryCounter*(*)(void)) sym;
+ *		// Use the function
+ *		memcounter::IMemoryCounter* pMemoryCounter=createNewMemoryCounter();
+ *		// Do stuff...
+ *	}
+ *
+ *
+ */
+using memcounter::IMemoryCounter;
+extern "C"
+{
+	VISIBLE IMemoryCounter* createNewMemoryCounter( void )
+	{
+		return memcounter::MemoryCounterManager::instance().createNewMemoryCounter();
+	}
+}
+
+
+namespace // Use the unnamed namespace
+{
 	/** @brief Sentry using RAII to block memory counting while I'm doing some internal memory manipulation.
 	 *
 	 * The memory counting functions check that memcounter_threadDisabled is zero before doing anything, so
@@ -46,12 +113,12 @@ namespace // Use the unnamed namespace
 		MemoryCounterManagerImplementation();
 		~MemoryCounterManagerImplementation();
 		memcounter::IMemoryCounter* createNewMemoryCounter();
-		void preAddToAllEnabledCountersForCurrentThread( void* pointer, size_t size );
-		void postAddToAllEnabledCountersForCurrentThread( void* pointer, size_t size );
-		void preModifyAllEnabledCountersForCurrentThread( void* oldPointer, void* newPointer, size_t newSize );
-		void postModifyAllEnabledCountersForCurrentThread( void* oldPointer, void* newPointer, size_t newSize );
-		void preRemoveFromAllEnabledCountersForCurrentThread( void* pointer );
-		void postRemoveFromAllEnabledCountersForCurrentThread( void* pointer );
+		virtual void preAddToAllEnabledCountersForCurrentThread( void* pointer, size_t size );
+		virtual void postAddToAllEnabledCountersForCurrentThread( void* pointer, size_t size );
+		virtual void preModifyAllEnabledCountersForCurrentThread( void* oldPointer, void* newPointer, size_t newSize );
+		virtual void postModifyAllEnabledCountersForCurrentThread( void* oldPointer, void* newPointer, size_t newSize );
+		virtual void preRemoveFromAllEnabledCountersForCurrentThread( void* pointer );
+		virtual void postRemoveFromAllEnabledCountersForCurrentThread( void* pointer );
 	protected:
 		inline memcounter::ThreadMemoryCounterPool* getThreadMemoryCounterPool();
 		memcounter::ThreadMemoryCounterPool* createThreadMemoryCounterPool();
@@ -115,17 +182,6 @@ namespace // Use the unnamed namespace
 	}
 
 } // end of the unnamed namespace
-
-void enableThisThread()
-{
-	pthread_setspecific( memcounter_threadDisabled, 0 );
-}
-
-void disableThisThread()
-{
-	pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
-}
-
 
 memcounter::MemoryCounterManager& memcounter::MemoryCounterManager::instance()
 {

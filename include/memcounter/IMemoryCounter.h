@@ -24,8 +24,8 @@ namespace memcounter
 		virtual void resetMaximum() = 0;
 
 		virtual void dumpContents( std::ostream& stream=std::cout, const std::string& prefix=std::string() ) = 0;
-		virtual int currentSize() = 0;
-		virtual int maximumSize() = 0;
+		virtual size_t currentSize() = 0;
+		virtual size_t maximumSize() = 0;
 
 		///< Returns the number of allocations still outstanding
 		virtual int currentNumberOfAllocations() = 0;
