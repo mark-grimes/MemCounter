@@ -10,6 +10,7 @@
 #include "memcounter/DisablingFunctions.h"
 
 #include <malloc.h>
+#include <unistd.h> // Required to get the pagesize for valloc
 
 // The IgHook library
 #include <cstdlib>
@@ -417,6 +418,8 @@ static void* docalloc( IgHook::SafeData<igprof_docalloc_t> &hook, size_t num, si
 		}
 		else
 		{
+			// FixedMemoryBlockHeader is smaller than VariableMemoryBlockHeader, so if a fixed header
+			// can fit I'll use that. It will only work if it fits exactly though.
 			if( size<=sizeof(::FixedMemoryBlockHeader) && sizeof(::FixedMemoryBlockHeader)%size==0 )
 			{
 				extraHeaderElements=sizeof(::FixedMemoryBlockHeader)/size;
@@ -425,7 +428,7 @@ static void* docalloc( IgHook::SafeData<igprof_docalloc_t> &hook, size_t num, si
 			else
 			{
 				extraHeaderElements=sizeof(::VariableMemoryBlockHeader)/size;
-				if( sizeof(::VariableMemoryBlockHeader)%size != 0 ) ++extraHeaderElements;
+				if( sizeof(::VariableMemoryBlockHeader)%size != 0 ) ++extraHeaderElements; // Always round up
 				useFixedHeader=false;
 			}
 		}
@@ -550,35 +553,241 @@ static void* dorealloc( IgHook::SafeData<igprof_dorealloc_t> &hook, void *ptr, s
 
 static void* domemalign( IgHook::SafeData<igprof_domemalign_t> &hook, size_t alignment, size_t size )
 {
-	void* result=( *hook.chain )( alignment, size );
-	std::cerr << " *** domemalign *** result= " << result << " alignment= " << alignment << " size= " << size << std::endl;
-	std::exit(3);
-	return result;
-//
-//	std::cerr << " *** MEMCOUNTER *** - intrusiveMemCounter doesn't work with memalign. You'll likely get a crash when you try and free this memory." << std::endl;
-//	return ( *hook.chain )( alignment, size );
+	if( memcounter_globallyDisabled || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( alignment, size );
+	else
+	{
+		// I don't have any programs that use memalign to test with, so I'll warn the user
+		std::cerr << " memcounter warning - you're program uses memalign which should work but hasn't been tested" << "\n";
+
+		size_t alignedHeaderSize; // This is how many multiples of the alignment, not the actual size
+		bool useFixedHeader;
+
+		if( alignment>sizeof(::VariableMemoryBlockHeader) )
+		{
+			alignedHeaderSize=1;
+			useFixedHeader=false;
+		}
+		else
+		{
+			// FixedMemoryBlockHeader is smaller than VariableMemoryBlockHeader, so if a fixed header
+			// can fit I'll use that. It will only work if it fits exactly though.
+			if( alignment<=sizeof(::FixedMemoryBlockHeader) && sizeof(::FixedMemoryBlockHeader)%alignment==0 )
+			{
+				alignedHeaderSize=sizeof(::FixedMemoryBlockHeader)/alignment;
+				useFixedHeader=true;
+			}
+			else
+			{
+				alignedHeaderSize=sizeof(::VariableMemoryBlockHeader)/alignment;
+				if( sizeof(::VariableMemoryBlockHeader)%alignment != 0 ) ++alignedHeaderSize; // Always round up
+				useFixedHeader=false;
+			}
+		}
+
+		void* originalResult=( *hook.chain )( alignment, size+alignment*alignedHeaderSize );
+		if( originalResult==NULL )
+		{
+			std::cerr << "##### Arghh! Couldn't allocate memory with calloc! #####" << std::endl;
+			return NULL;
+		}
+
+		// Get a pointer to where the memory after the header elements is
+		void* result=(void*)( ((char*)originalResult) + alignment*alignedHeaderSize );
+		// Now that I have that, take off the size of the header struct so that any
+		// spare space will be at the beginning and the header is right in front of
+		// the memory location I pass back to the caller.
+		if( useFixedHeader )
+		{
+			::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
+			::FixedMemoryBlockHeader* pHeader=((::FixedMemoryBlockHeader*)result)-1;
+			*pIdentifier=sizeHasBeenStored;
+			pHeader->size=size;
+		}
+		else
+		{
+			::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
+			::VariableMemoryBlockHeader* pHeader=((::VariableMemoryBlockHeader*)result)-1;
+			*pIdentifier=variableSizeHasBeenStored;
+			pHeader->size=size;
+			pHeader->pOriginalPtr=originalResult;
+		}
+
+
+		if( !memcounter_globallyDisabled && !pthread_getspecific(memcounter_threadDisabled) )
+		{
+			// Disable memory counting while I do this in case any of my calls create a
+			// recursive loop. Any non-zero value will do, using this one to avoid casting.
+			pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
+
+			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledRecordersForCurrentThread( size );
+
+			// Put memory counting back on
+			pthread_setspecific( memcounter_threadDisabled, 0 );
+		}
+
+		return result;
+	}
+
 }
 
 static void* dovalloc( IgHook::SafeData<igprof_dovalloc_t> &hook, size_t size )
 {
-	void* result=( *hook.chain )( size );
-	std::cerr << " *** dovalloc *** result= " << result << " size= " << size << std::endl;
-	std::exit(3);
-	return result;
-//
-//	std::cerr << " *** MEMCOUNTER *** - intrusiveMemCounter doesn't work with valloc. You'll likely get a crash when you try and free this memory." << std::endl;
-//	return ( *hook.chain )( size );
+	if( memcounter_globallyDisabled || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( size );
+	else
+	{
+		// I don't have any programs that use valloc to test with, so I'll warn the user
+		std::cerr << " memcounter warning - you're program uses valloc which should work but hasn't been tested" << "\n";
+
+		long alignment=sysconf(_SC_PAGESIZE);
+		size_t alignedHeaderSize; // This is how many multiples of the alignment, not the actual size
+		bool useFixedHeader;
+
+		if( alignment>sizeof(::VariableMemoryBlockHeader) )
+		{
+			alignedHeaderSize=1;
+			useFixedHeader=false;
+		}
+		else
+		{
+			// FixedMemoryBlockHeader is smaller than VariableMemoryBlockHeader, so if a fixed header
+			// can fit I'll use that. It will only work if it fits exactly though.
+			if( alignment<=sizeof(::FixedMemoryBlockHeader) && sizeof(::FixedMemoryBlockHeader)%alignment==0 )
+			{
+				alignedHeaderSize=sizeof(::FixedMemoryBlockHeader)/alignment;
+				useFixedHeader=true;
+			}
+			else
+			{
+				alignedHeaderSize=sizeof(::VariableMemoryBlockHeader)/alignment;
+				if( sizeof(::VariableMemoryBlockHeader)%alignment != 0 ) ++alignedHeaderSize; // Always round up
+				useFixedHeader=false;
+			}
+		}
+
+		void* originalResult=( *hook.chain )( size+alignment*alignedHeaderSize );
+		if( originalResult==NULL )
+		{
+			std::cerr << "##### Arghh! Couldn't allocate memory with calloc! #####" << std::endl;
+			return NULL;
+		}
+
+		// Get a pointer to where the memory after the header elements is
+		void* result=(void*)( ((char*)originalResult) + alignment*alignedHeaderSize );
+		// Now that I have that, take off the size of the header struct so that any
+		// spare space will be at the beginning and the header is right in front of
+		// the memory location I pass back to the caller.
+		if( useFixedHeader )
+		{
+			::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
+			::FixedMemoryBlockHeader* pHeader=((::FixedMemoryBlockHeader*)result)-1;
+			*pIdentifier=sizeHasBeenStored;
+			pHeader->size=size;
+		}
+		else
+		{
+			::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
+			::VariableMemoryBlockHeader* pHeader=((::VariableMemoryBlockHeader*)result)-1;
+			*pIdentifier=variableSizeHasBeenStored;
+			pHeader->size=size;
+			pHeader->pOriginalPtr=originalResult;
+		}
+
+
+		if( !memcounter_globallyDisabled && !pthread_getspecific(memcounter_threadDisabled) )
+		{
+			// Disable memory counting while I do this in case any of my calls create a
+			// recursive loop. Any non-zero value will do, using this one to avoid casting.
+			pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
+
+			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledRecordersForCurrentThread( size );
+
+			// Put memory counting back on
+			pthread_setspecific( memcounter_threadDisabled, 0 );
+		}
+
+		return result;
+	}
 }
 
 static int dopmemalign( IgHook::SafeData<igprof_dopmemalign_t> &hook, void **ptr, size_t alignment, size_t size )
 {
-	int result=( *hook.chain )( ptr, alignment, size );
-	std::cerr << " *** domemalign *** result= " << result << " ptr= " << ptr << " alignment= " << alignment << " size= " << size << std::endl;
-	std::exit(3);
-	return result;
-//
-//	std::cerr << " *** MEMCOUNTER *** - intrusiveMemCounter doesn't work with posix_memalign. You'll likely get a crash when you try and free this memory." << std::endl;
-//	return ( *hook.chain )( ptr, alignment, size );
+	if( memcounter_globallyDisabled || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( ptr, alignment, size );
+	else
+	{
+		// I don't have any programs that use posix_memalign to test with, so I'll warn the user
+		std::cerr << " memcounter warning - you're program uses posix_memalign which should work but hasn't been tested" << "\n";
+
+		size_t alignedHeaderSize; // This is how many multiples of the alignment, not the actual size
+		bool useFixedHeader;
+
+		if( alignment>sizeof(::VariableMemoryBlockHeader) )
+		{
+			alignedHeaderSize=1;
+			useFixedHeader=false;
+		}
+		else
+		{
+			// FixedMemoryBlockHeader is smaller than VariableMemoryBlockHeader, so if a fixed header
+			// can fit I'll use that. It will only work if it fits exactly though.
+			if( alignment<=sizeof(::FixedMemoryBlockHeader) && sizeof(::FixedMemoryBlockHeader)%alignment==0 )
+			{
+				alignedHeaderSize=sizeof(::FixedMemoryBlockHeader)/alignment;
+				useFixedHeader=true;
+			}
+			else
+			{
+				alignedHeaderSize=sizeof(::VariableMemoryBlockHeader)/alignment;
+				if( sizeof(::VariableMemoryBlockHeader)%alignment != 0 ) ++alignedHeaderSize; // Always round up
+				useFixedHeader=false;
+			}
+		}
+
+		void* originalResult;
+		int returnValue=( *hook.chain )( &originalResult, alignment, size+alignment*alignedHeaderSize );
+		if( originalResult==NULL )
+		{
+			std::cerr << "##### Arghh! Couldn't allocate memory with calloc! #####" << std::endl;
+			*ptr=NULL;
+			return returnValue;
+		}
+
+		// Get a pointer to where the memory after the header elements is
+		void* result=(void*)( ((char*)originalResult) + alignment*alignedHeaderSize );
+		// Now that I have that, take off the size of the header struct so that any
+		// spare space will be at the beginning and the header is right in front of
+		// the memory location I pass back to the caller.
+		if( useFixedHeader )
+		{
+			::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
+			::FixedMemoryBlockHeader* pHeader=((::FixedMemoryBlockHeader*)result)-1;
+			*pIdentifier=sizeHasBeenStored;
+			pHeader->size=size;
+		}
+		else
+		{
+			::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
+			::VariableMemoryBlockHeader* pHeader=((::VariableMemoryBlockHeader*)result)-1;
+			*pIdentifier=variableSizeHasBeenStored;
+			pHeader->size=size;
+			pHeader->pOriginalPtr=originalResult;
+		}
+
+
+		if( !memcounter_globallyDisabled && !pthread_getspecific(memcounter_threadDisabled) )
+		{
+			// Disable memory counting while I do this in case any of my calls create a
+			// recursive loop. Any non-zero value will do, using this one to avoid casting.
+			pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
+
+			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledRecordersForCurrentThread( size );
+
+			// Put memory counting back on
+			pthread_setspecific( memcounter_threadDisabled, 0 );
+		}
+
+		*ptr=result;
+		return returnValue;
+	}
 }
 
 static void dofree( IgHook::SafeData<igprof_dofree_t> &hook, void *ptr )

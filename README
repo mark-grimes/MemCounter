@@ -119,7 +119,8 @@ object, call "enable" on it and call the counter information methods itself.
 -- A note about the code --
 ---------------------------
 If you want to look through the source code, note that there are a few obsolete files
-that might confuse you. Pay no attention to any of these:
+that might confuse you. These are from early implementations that take ridiculously long
+to run. Pay no attention to any of these:
 
 include/hooksAndEntryPoints.h
 include/memcounter/ICountingInterface.h
