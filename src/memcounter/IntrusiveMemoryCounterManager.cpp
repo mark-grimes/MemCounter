@@ -145,9 +145,9 @@ namespace // Use the unnamed namespace
 		IntrusiveMemoryCounterManagerImplementation();
 		~IntrusiveMemoryCounterManagerImplementation();
 		memcounter::IMemoryCounter* createNewMemoryCounter();
-		virtual void addToAllEnabledRecordersForCurrentThread( size_t size );
-		virtual void modifyAllEnabledRecordersForCurrentThread( size_t oldSize, size_t newSize );
-		virtual void removeFromAllEnabledRecordersForCurrentThread( size_t size );
+		virtual void addToAllEnabledCountersForCurrentThread( size_t size );
+		virtual void modifyAllEnabledCountersForCurrentThread( size_t oldSize, size_t newSize );
+		virtual void removeFromAllEnabledCountersForCurrentThread( size_t size );
 	protected:
 		inline memcounter::ThreadMemoryCounterPool* getThreadMemoryCounterPool();
 		memcounter::ThreadMemoryCounterPool* createThreadMemoryCounterPool();
@@ -305,7 +305,7 @@ memcounter::IMemoryCounter* ::IntrusiveMemoryCounterManagerImplementation::creat
 	// recursive loop.
 	pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
 
-	memcounter::IMemoryCounter* result=getThreadMemoryCounterPool()->createNewMemoryRecorder();;
+	memcounter::IMemoryCounter* result=getThreadMemoryCounterPool()->createNewMemoryCounter();;
 
 	// Put memory counting back on
 	pthread_setspecific( memcounter_threadDisabled, 0 );
@@ -313,19 +313,19 @@ memcounter::IMemoryCounter* ::IntrusiveMemoryCounterManagerImplementation::creat
 	return result;
 }
 
-void ::IntrusiveMemoryCounterManagerImplementation::addToAllEnabledRecordersForCurrentThread( size_t size )
+void ::IntrusiveMemoryCounterManagerImplementation::addToAllEnabledCountersForCurrentThread( size_t size )
 {
-	getThreadMemoryCounterPool()->addToAllEnabledRecorders( size );
+	getThreadMemoryCounterPool()->addToAllEnabledCounters( size );
 }
 
-void ::IntrusiveMemoryCounterManagerImplementation::modifyAllEnabledRecordersForCurrentThread( size_t oldSize, size_t newSize )
+void ::IntrusiveMemoryCounterManagerImplementation::modifyAllEnabledCountersForCurrentThread( size_t oldSize, size_t newSize )
 {
-	getThreadMemoryCounterPool()->modifyAllEnabledRecorders( oldSize, newSize );
+	getThreadMemoryCounterPool()->modifyAllEnabledCounters( oldSize, newSize );
 }
 
-void ::IntrusiveMemoryCounterManagerImplementation::removeFromAllEnabledRecordersForCurrentThread( size_t size )
+void ::IntrusiveMemoryCounterManagerImplementation::removeFromAllEnabledCountersForCurrentThread( size_t size )
 {
-	getThreadMemoryCounterPool()->removeFromAllEnabledRecorders( size );
+	getThreadMemoryCounterPool()->removeFromAllEnabledCounters( size );
 }
 
 inline memcounter::ThreadMemoryCounterPool* ::IntrusiveMemoryCounterManagerImplementation::getThreadMemoryCounterPool()
@@ -390,7 +390,7 @@ static void* domalloc( IgHook::SafeData<igprof_domalloc_t> &hook, size_t n )
 			// recursive loop. Any non-zero value will do, using this one to avoid casting.
 			pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
 
-			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledRecordersForCurrentThread( n );
+			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledCountersForCurrentThread( n );
 
 			// Put memory counting back on
 			pthread_setspecific( memcounter_threadDisabled, 0 );
@@ -468,7 +468,7 @@ static void* docalloc( IgHook::SafeData<igprof_docalloc_t> &hook, size_t num, si
 			// recursive loop. Any non-zero value will do, using this one to avoid casting.
 			pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
 
-			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledRecordersForCurrentThread( num*size );
+			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledCountersForCurrentThread( num*size );
 
 			// Put memory counting back on
 			pthread_setspecific( memcounter_threadDisabled, 0 );
@@ -540,7 +540,7 @@ static void* dorealloc( IgHook::SafeData<igprof_dorealloc_t> &hook, void *ptr, s
 				// recursive loop. Any non-zero value will do, using this one to avoid casting.
 				pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
 
-				memcounter::IntrusiveMemoryCounterManager::instance().modifyAllEnabledRecordersForCurrentThread( originalSize, n );
+				memcounter::IntrusiveMemoryCounterManager::instance().modifyAllEnabledCountersForCurrentThread( originalSize, n );
 
 				// Put memory counting back on
 				pthread_setspecific( memcounter_threadDisabled, 0 );
@@ -619,7 +619,7 @@ static void* domemalign( IgHook::SafeData<igprof_domemalign_t> &hook, size_t ali
 			// recursive loop. Any non-zero value will do, using this one to avoid casting.
 			pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
 
-			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledRecordersForCurrentThread( size );
+			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledCountersForCurrentThread( size );
 
 			// Put memory counting back on
 			pthread_setspecific( memcounter_threadDisabled, 0 );
@@ -699,7 +699,7 @@ static void* dovalloc( IgHook::SafeData<igprof_dovalloc_t> &hook, size_t size )
 			// recursive loop. Any non-zero value will do, using this one to avoid casting.
 			pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
 
-			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledRecordersForCurrentThread( size );
+			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledCountersForCurrentThread( size );
 
 			// Put memory counting back on
 			pthread_setspecific( memcounter_threadDisabled, 0 );
@@ -779,7 +779,7 @@ static int dopmemalign( IgHook::SafeData<igprof_dopmemalign_t> &hook, void **ptr
 			// recursive loop. Any non-zero value will do, using this one to avoid casting.
 			pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
 
-			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledRecordersForCurrentThread( size );
+			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledCountersForCurrentThread( size );
 
 			// Put memory counting back on
 			pthread_setspecific( memcounter_threadDisabled, 0 );
@@ -827,7 +827,7 @@ static void dofree( IgHook::SafeData<igprof_dofree_t> &hook, void *ptr )
 		// recursive loop. Any non-zero value will do, using this one to avoid casting.
 		pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
 
-		memcounter::IntrusiveMemoryCounterManager::instance().removeFromAllEnabledRecordersForCurrentThread( originalSize );
+		memcounter::IntrusiveMemoryCounterManager::instance().removeFromAllEnabledCountersForCurrentThread( originalSize );
 
 		// Put memory counting back on
 		pthread_setspecific( memcounter_threadDisabled, 0 );

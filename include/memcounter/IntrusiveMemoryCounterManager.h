@@ -26,9 +26,9 @@ namespace memcounter
 
 		virtual IMemoryCounter* createNewMemoryCounter() = 0;
 
-		virtual void addToAllEnabledRecordersForCurrentThread( size_t size ) = 0;
-		virtual void modifyAllEnabledRecordersForCurrentThread( size_t oldSize, size_t newSize ) = 0;
-		virtual void removeFromAllEnabledRecordersForCurrentThread( size_t size ) = 0;
+		virtual void addToAllEnabledCountersForCurrentThread( size_t size ) = 0;
+		virtual void modifyAllEnabledCountersForCurrentThread( size_t oldSize, size_t newSize ) = 0;
+		virtual void removeFromAllEnabledCountersForCurrentThread( size_t size ) = 0;
 	protected:
 		IntrusiveMemoryCounterManager();
 		virtual ~IntrusiveMemoryCounterManager();

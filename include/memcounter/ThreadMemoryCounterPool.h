@@ -10,7 +10,6 @@ namespace memcounter
 {
 	class IMemoryCounter;
 	class ICountingInterface;
-	class IRecordingInterface;
 }
 
 namespace memcounter
@@ -36,35 +35,20 @@ namespace memcounter
 		//
 		memcounter::IMemoryCounter* createNewMemoryCounter();
 
-		void preAddToAllEnabledCounters( void* pointer, size_t size );
-		void postAddToAllEnabledCounters( void* pointer, size_t size );
-		void preModifyAllEnabledCounters( void* oldPointer, void* newPointer, size_t newSize );
-		void postModifyAllEnabledCounters( void* oldPointer, void* newPointer, size_t newSize );
-		void preRemoveFromAllEnabledCounters( void* pointer );
-		void postRemoveFromAllEnabledCounters( void* pointer );
+		void addToAllEnabledCounters( size_t size );
+		void modifyAllEnabledCounters( size_t oldSize, size_t newSize );
+		void removeFromAllEnabledCounters( size_t size );
 
 		void informEnabled( memcounter::ICountingInterface* pEnabledCounter );
 		void informDisabled( memcounter::ICountingInterface* pDisabledCounter );
 
-		//
-		// These methods deal with the registered IRecordingInterfaces
-		//
-		memcounter::IMemoryCounter* createNewMemoryRecorder();
-
-		void addToAllEnabledRecorders( size_t size );
-		void modifyAllEnabledRecorders( size_t oldSize, size_t newSize );
-		void removeFromAllEnabledRecorders( size_t size );
-
-		void informEnabled( memcounter::IRecordingInterface* pEnabledCounter );
-		void informDisabled( memcounter::IRecordingInterface* pDisabledCounter );
-
 	protected:
-		std::vector<memcounter::ICountingInterface*> createdCounters_;
+//		std::vector<memcounter::ICountingInterface*> createdCounters_;
 		// I'm having performance issues so currently only using the most recent counter
-		memcounter::ICountingInterface* pLastEnabledCounter_;
+//		memcounter::ICountingInterface* pLastEnabledCounter_;
 
-		std::vector<memcounter::IRecordingInterface*> createdRecorders_;
-		std::list<memcounter::IRecordingInterface*> enabledRecorders_;
+		std::vector<memcounter::ICountingInterface*> createdCounters_;
+		std::list<memcounter::ICountingInterface*> enabledCounters_;
 	}; // end of the MemoryCounter class
 
 } // end of the memcounter namespace

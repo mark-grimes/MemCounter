@@ -33,41 +33,25 @@ IF(UNIX)
 ENDIF()
 
 # Change the executable script to have the correct path to the library
-CONFIGURE_FILE( "${PROJECT_SOURCE_DIR}/bin/marksMemoryAnalyser.in"
-                "${PROJECT_BINARY_DIR}/bin/marksMemoryAnalyser" @ONLY )
 CONFIGURE_FILE( "${PROJECT_SOURCE_DIR}/bin/intrusiveMemoryAnalyser.in"
                 "${PROJECT_BINARY_DIR}/bin/intrusiveMemoryAnalyser" @ONLY )
 
 # Build targets.
 INCLUDE_DIRECTORIES(${PROJECT_SOURCE_DIR}/include)
-ADD_LIBRARY(marksMemoryAnalyser SHARED
-			src/hook.cc
-			src/profile.cc
-			src/memcounter/MemoryCounterManager.cpp
-			src/memcounter/ThreadMemoryCounterPool.cpp
-			src/memcounter/TrackingMemoryCounter.cpp
-			src/memcounter/MallinfoMemoryCounter.cpp
-            )
 
 ADD_LIBRARY(intrusiveMemoryAnalyser SHARED
 			src/hook.cc
 			src/profile.cc
 			src/memcounter/IntrusiveMemoryCounterManager.cpp
 			src/memcounter/ThreadMemoryCounterPool.cpp
-			src/memcounter/RecordingMemoryCounter.cpp
+			src/memcounter/MemoryCounterImplementation.cpp
             )
 
 #SET_TARGET_PROPERTIES(marksMemoryAnalyser PROPERTIES LINK_FLAGS -Wl,-z,nodefs)
-TARGET_LINK_LIBRARIES(marksMemoryAnalyser ${marksMemoryAnalyser_LIBS} ${CMAKE_THREAD_LIBS_INIT})
 TARGET_LINK_LIBRARIES(intrusiveMemoryAnalyser ${marksMemoryAnalyser_LIBS} ${CMAKE_THREAD_LIBS_INIT})
-INSTALL(TARGETS marksMemoryAnalyser
-	LIBRARY DESTINATION lib
-	ARCHIVE DESTINATION lib)
 INSTALL(TARGETS intrusiveMemoryAnalyser
 	LIBRARY DESTINATION lib
 	ARCHIVE DESTINATION lib)
-INSTALL( FILES "${PROJECT_BINARY_DIR}/bin/marksMemoryAnalyser" DESTINATION bin
-	PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )
 INSTALL( FILES "${PROJECT_BINARY_DIR}/bin/intrusiveMemoryAnalyser" DESTINATION bin
 	PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )
 INSTALL(FILES include/memcounter/IMemoryCounter.h DESTINATION include/memcounter)
