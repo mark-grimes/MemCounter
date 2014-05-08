@@ -56,7 +56,7 @@ namespace memcounter
 		//
 		void childEnabled( memcounter::MemoryCounterImplementation* pEnabledSubCounter );
 		void childDisabled( memcounter::MemoryCounterImplementation* pDisabledSubCounter );
-		bool rawSetEnabled( bool enable ); ///< Allows a parent to set the status of a sub-counter without causing a notification
+		void rawSetEnabled( bool enable ); ///< Allows a parent to set the status of a sub-counter without causing a notification
 	protected:
 		bool enabled_;
 		long int currentSize_;

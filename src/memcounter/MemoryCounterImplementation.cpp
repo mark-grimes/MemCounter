@@ -156,7 +156,7 @@ void memcounter::MemoryCounterImplementation::childDisabled( memcounter::MemoryC
 	if( pCurrentlyActiveSubCounter_==pDisabledSubCounter ) pCurrentlyActiveSubCounter_=NULL;
 }
 
-bool memcounter::MemoryCounterImplementation::rawSetEnabled( bool enable )
+void memcounter::MemoryCounterImplementation::rawSetEnabled( bool enable )
 {
 	enabled_=enable;
 }
