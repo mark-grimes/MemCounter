@@ -305,7 +305,7 @@ memcounter::IMemoryCounter* ::IntrusiveMemoryCounterManagerImplementation::creat
 	// recursive loop.
 	pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
 
-	memcounter::IMemoryCounter* result=getThreadMemoryCounterPool()->createNewMemoryCounter();;
+	memcounter::IMemoryCounter* result=getThreadMemoryCounterPool()->createNewMemoryCounter();
 
 	// Put memory counting back on
 	pthread_setspecific( memcounter_threadDisabled, 0 );
