@@ -6,6 +6,7 @@ A simple memory counter. Other tools like igprof and valgrind do a much a better
 I found them too slow and obscured what I wanted with too much information. This is
 actually built on top of ighook which is the foundation of igprof anyway
 (http://igprof.sourceforge.net).
+
 Note that this counter requires you to modify your code, because it's only intended to
 profile particular parts of code. The speed overhead is quite small, but there is a small
 memory overhead for *EACH* dynamic memory allocation in your program. So the overhead
@@ -145,11 +146,11 @@ A note about the code
 The following files are from ighook and nothing to do with me. Ighook is part of the
 rather good igprof available from igprof.sourceforge.net
 
-include/hook.h
-include/macros.h
-include/profile.h
-src/hook.cc
-src/profile.cc
+    include/hook.h
+    include/macros.h
+    include/profile.h
+    src/hook.cc
+    src/profile.cc
 
 Most of the functionality is in memcounter/IntrusiveMemoryCounterManager, so that's the
 best place to start.
