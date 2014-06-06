@@ -113,7 +113,7 @@ const std::vector<memcounter::IMemoryCounter*>& memcounter::MemoryCounterImpleme
 
 void memcounter::MemoryCounterImplementation::add( size_t size )
 {
-	if( !enabled_ ) return;
+//	if( !enabled_ ) return;
 
 	currentSize_+=size;
 	if( currentSize_>maximumSize_ ) maximumSize_=currentSize_;
@@ -124,7 +124,7 @@ void memcounter::MemoryCounterImplementation::add( size_t size )
 
 void memcounter::MemoryCounterImplementation::modify( size_t oldSize, size_t newSize )
 {
-	if( !enabled_ ) return;
+//	if( !enabled_ ) return;
 
 //	if( newSize<oldSize && currentSize_<oldSize-newSize ) std::cerr << " *MEMCOUNTER* - Argh! underflow in modify" << std::endl;
 
@@ -135,7 +135,7 @@ void memcounter::MemoryCounterImplementation::modify( size_t oldSize, size_t new
 
 void memcounter::MemoryCounterImplementation::remove( size_t size )
 {
-	if( !enabled_ ) return;
+//	if( !enabled_ ) return;
 
 //	if( currentSize_<size ) std::cerr << " *MEMCOUNTER* - Argh! underflow in remove" << std::endl;
 
