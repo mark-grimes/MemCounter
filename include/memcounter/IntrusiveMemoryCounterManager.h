@@ -2,12 +2,14 @@
 #define memcounter_IntrusiveMemoryCounterManager_h
 
 #include <stddef.h> // needed for size_t
+#include <vector>
 
 
 // Forward declarations
 namespace memcounter
 {
 	class IMemoryCounter;
+	class ICountingInterface;
 }
 
 
@@ -29,6 +31,8 @@ namespace memcounter
 		virtual void addToAllEnabledCountersForCurrentThread( size_t size ) = 0;
 		virtual void modifyAllEnabledCountersForCurrentThread( size_t oldSize, size_t newSize ) = 0;
 		virtual void removeFromAllEnabledCountersForCurrentThread( size_t size ) = 0;
+
+		virtual std::vector<memcounter::ICountingInterface*> enabledCounters() = 0;
 	protected:
 		IntrusiveMemoryCounterManager();
 		virtual ~IntrusiveMemoryCounterManager();

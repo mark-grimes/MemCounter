@@ -3,9 +3,11 @@
 #include <iostream>
 #include <pthread.h>
 #include <vector>
+#include <memory>
 
 #include "memcounter/MutexSentry.h"
 #include "memcounter/IMemoryCounter.h"
+#include "memcounter/ICountingInterface.h"
 #include "memcounter/ThreadMemoryCounterPool.h"
 #include "memcounter/DisablingFunctions.h"
 
@@ -37,14 +39,66 @@ LIBHOOK(4, int, dopthread_create, _pthread21, (pthread_t *thread, const pthread_
 
 // These are the implementations of the functions defined in DisablingFunctions.h
 // This is the extern from the disabling functions
+bool memcounter_globallyDisabled=true;
+
 namespace // Use the unnamed namespace
 {
 	// If this key is non-zero for a given thread then the memory counting functions will just do
 	// the normal behaviour, i.e. pass the calls on to the real malloc etcetera without recording
 	// anything.
 	pthread_key_t memcounter_threadDisabled;
+
+	// If this key is non-zero it indicates that I'm doing some internal stuff on this thread.
+	// The hooks should not do anything and pass on to the real functions, otherwise I'll probably
+	// start an infinite loop.
+	pthread_key_t memcounter_threadInternalUsage;
+
+	/** @brief Class that sets memcounter_threadInternalUsage to non-zero and returns it to its previous
+	 * value when it goes out of scope.
+	 * @author Mark Grimes (mark.grimes@bristol.ac.uk)
+	 * @date 30/May/2014
+	 */
+	class RecursiveHookGuard
+	{
+	public:
+		RecursiveHookGuard() : previousValue_( pthread_getspecific(memcounter_threadInternalUsage) )
+		{
+			// I want to set this to any non-zero value. I'll just use the address
+			// of the member to avoid horrible casting.
+			pthread_setspecific(memcounter_threadInternalUsage,&previousValue_);
+		}
+		~RecursiveHookGuard()
+		{
+			pthread_setspecific(memcounter_threadInternalUsage,previousValue_);
+		}
+		/// @brief Needs to be performed only once at program startup
+		static void initialise()
+		{
+			if( !( pthread_key_create(&memcounter_threadInternalUsage,NULL)==0 ) )
+			{
+				std::cerr << "Oh dear, couldn't create a key for some reason" << std::endl;
+			}
+		}
+		/** @brief Returns true if the current thread is doing something internal for the memory counting, so the
+		 * hooks should just return the defaults. */
+		static bool internalUsage()
+		{
+			if( pthread_getspecific(memcounter_threadInternalUsage)==0 ) return false;
+			else return true;
+		}
+		/// @brief Forces the current value of what internalUsage() returns.
+		static void forceCurrentValue( bool active )
+		{
+			// Any non-zero value will do. use the address of memcounter_globallyDisabled for convenience
+			if( active ) pthread_setspecific(memcounter_threadInternalUsage,&memcounter_globallyDisabled);
+			else pthread_setspecific(memcounter_threadInternalUsage,0);
+		}
+	private:
+		const void* previousValue_;
+		//static pthread_key_t memcounter_threadInternalUsage;
+	};
 }
-bool memcounter_globallyDisabled=true;
+
 void memcounter::enableThisThread()
 {
 //	std::cerr << " *** Enabling thread *** " << std::endl;
@@ -109,17 +163,43 @@ namespace // Use the unnamed namespace
 				&& header1.identifier4==header2.identifier4;
 	}
 
+	std::ostream& operator<<( std::ostream& theStream, const struct HeaderIdentifier& header )
+	{
+		theStream << header.identifier1 << header.identifier2 << header.identifier3 << header.identifier4;
+		return theStream;
+	}
+
 	struct VariableMemoryBlockHeader
 	{
 		void* pOriginalPtr;
 		size_t size;
-		struct HeaderIdentifier do_not_access_this; // Imperative that this is the last member
+		/** Imperative that this is the last member. N.B. I play with byte alignment so the member might not
+		 * actually be accessible here. It's declared so as to reserve enough size in the structure for it. */
+		struct HeaderIdentifier do_not_access_this;
 	};
 
 	struct FixedMemoryBlockHeader
 	{
 		size_t size;
-		struct HeaderIdentifier do_not_access_this; // Imperative that this is the last member
+		/** Imperative that this is the last member. N.B. I play with byte alignment so the member might not
+		 * actually be accessible here. It's declared so as to reserve enough size in the structure for it. */
+		struct HeaderIdentifier do_not_access_this;
+	};
+
+	/** @Memory block header that keeps track of which IMemoryCounters should be notified when it's freed
+	 *
+	 * Using this memory block header is sometimes necessary when passing memory around. If the memory is
+	 * released when the required IMemoryCounters are not or cannot be active, then there will be an accounting
+	 * surplus. It will look like there are memory leaks when there actually aren't.
+	 */
+	struct TrackedMemoryBlockHeader
+	{
+		void *pOriginalPtr;
+		std::vector<memcounter::ICountingInterface*>* pCountersToNotify;
+		size_t size;
+		/** Imperative that this is the last member. N.B. I play with byte alignment so the member might not
+		 * actually be accessible here. It's declared so as to reserve enough size in the structure for it. */
+		struct HeaderIdentifier do_not_access_this;
 	};
 
 	/*
@@ -127,10 +207,11 @@ namespace // Use the unnamed namespace
 	 * the pointer incremented, I'm going to put a unique identifier in as well. It's not
 	 * foolproof, but the chances of a random memory location having this exact same value are
 	 * slim. The value doesn't really matter as long it's unique and unlikely to happen at
-	 * random, i.e. not 0;
+	 * random, e.g. not 0;
 	 */
 	const HeaderIdentifier sizeHasBeenStored={'g','%','z','('}; // random arbitrary bytes
-	const HeaderIdentifier variableSizeHasBeenStored={'r','q','q','£'};
+	const HeaderIdentifier variableSizeHasBeenStored={'r','q','q','$'};
+	const HeaderIdentifier trackedSizeHasBeenStored={'x','q','&','}'};
 
 
 	/** @brief Implementation of the IntrusiveMemoryCounterManager.
@@ -148,10 +229,12 @@ namespace // Use the unnamed namespace
 		virtual void addToAllEnabledCountersForCurrentThread( size_t size );
 		virtual void modifyAllEnabledCountersForCurrentThread( size_t oldSize, size_t newSize );
 		virtual void removeFromAllEnabledCountersForCurrentThread( size_t size );
+		virtual std::vector<memcounter::ICountingInterface*> enabledCounters();
 	protected:
 		inline memcounter::ThreadMemoryCounterPool* getThreadMemoryCounterPool();
 		memcounter::ThreadMemoryCounterPool* createThreadMemoryCounterPool();
 
+		const int verbosity_;
 		pthread_key_t keyThreadMemoryCounterPool_;
 		pthread_mutex_t mutex_;
 		std::vector<memcounter::ThreadMemoryCounterPool*> threadPools_; //< @Keep track of the allocated pools so that I can delete them at the end
@@ -183,7 +266,7 @@ namespace // Use the unnamed namespace
 	 */
 	void* proxyThreadStartRoutine( void *pThreadCreationArguments )
 	{
-		std::cerr << "proxyThreadStartRoutine starting" << std::endl;
+		std::cerr << "proxyThreadStartRoutine starting on thread pthread_self=" << pthread_self() << std::endl;
 		// First disable memory counting for this thread while I set stuff up. I want it set to any non
 		// zero value, I'll use the address of memcounter_globallyDisabled purely for convenience.
 		pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
@@ -203,8 +286,9 @@ namespace // Use the unnamed namespace
 		// Otherwise any memory allocation in this thread would try and call a non-existent
 		// pool and cause a segfault.
 		if( createPool ) pthread_setspecific( memcounter_threadDisabled, 0 );
+		::RecursiveHookGuard::forceCurrentValue(false);
 
-		std::cerr << "proxyThreadStartRoutine passing to start_routine" << std::endl;
+		std::cerr << "proxyThreadStartRoutine passing to start_routine on thread pthread_self=" << pthread_self() << std::endl;
 
 		// Now pass on to the function that the caller originally wanted
 		return start_routine(pArguments);
@@ -219,17 +303,15 @@ memcounter::IntrusiveMemoryCounterManager& memcounter::IntrusiveMemoryCounterMan
 
 memcounter::IntrusiveMemoryCounterManager::IntrusiveMemoryCounterManager()
 {
-	if(false) std::cerr << "Creating memcounter::IntrusiveMemoryCounterManager" << std::endl;
 }
 
 memcounter::IntrusiveMemoryCounterManager::~IntrusiveMemoryCounterManager()
 {
-	if(false) std::cerr << "Destroying memcounter::IntrusiveMemoryCounterManager" << std::endl;
 }
 
-::IntrusiveMemoryCounterManagerImplementation::IntrusiveMemoryCounterManagerImplementation()
+::IntrusiveMemoryCounterManagerImplementation::IntrusiveMemoryCounterManagerImplementation() : verbosity_(1)
 {
-	if(true) std::cerr << "Creating memcounter::IntrusiveMemoryCounterManagerImplementation" << std::endl;
+	if(verbosity_>0) std::cerr << "Creating memcounter::IntrusiveMemoryCounterManagerImplementation on thread pthread_self=" << pthread_self() << std::endl;
 
 	if( !( pthread_key_create(&keyThreadMemoryCounterPool_,NULL)==0 ) )
 	{
@@ -246,6 +328,8 @@ memcounter::IntrusiveMemoryCounterManager::~IntrusiveMemoryCounterManager()
 		std::cerr << "Oh dear, couldn't create the mutex for some reason" << std::endl;
 	}
 
+	::RecursiveHookGuard::initialise();
+
 	// Turn off memory counting for this thread until the user enables it by explicitly enabling one of
 	// the IMemoryCounter interfaces. Note that I want it to be any non-zero value, I'm only using
 	// the address of memcounter_globallyDisabled to save ugly casts.
@@ -254,8 +338,6 @@ memcounter::IntrusiveMemoryCounterManager::~IntrusiveMemoryCounterManager()
 	// I'm creating the ThreadMemoryCounterPools for each thread when it starts up.  I never get the chance
 	// for the main thread however, so I'll do it here since
 	createThreadMemoryCounterPool();
-
-	std::cerr << __LINE__ << " - " << __FILE__ << " pthread_self=" << pthread_self() << std::endl;
 
 	if( memcounter_globallyDisabled )
 	{
@@ -281,12 +363,13 @@ memcounter::IntrusiveMemoryCounterManager::~IntrusiveMemoryCounterManager()
 //			<< " void*=" << sizeof(void*) << " char=" << sizeof(char) << " size_t=" << sizeof(size_t)
 //			 << " Test=" << sizeof(::Test)<< std::endl;
 	// Now that everything is setup, enable the hooks
+	::RecursiveHookGuard::forceCurrentValue(false);
 	memcounter_globallyDisabled=false;
 }
 
 ::IntrusiveMemoryCounterManagerImplementation::~IntrusiveMemoryCounterManagerImplementation()
 {
-	if(true) std::cerr << "Destroying memcounter::IntrusiveMemoryCounterManagerImplementation" << std::endl;
+	if(verbosity_>0) std::cerr << "Destroying memcounter::IntrusiveMemoryCounterManagerImplementation on thread pthread_self=" << pthread_self() << std::endl;
 
 	// Delete all of the ThreadMemoryCounterPool objects I've created. This destructor should
 	// only be called at the end of program execution but I might as well tidy up in case I
@@ -299,18 +382,13 @@ memcounter::IntrusiveMemoryCounterManager::~IntrusiveMemoryCounterManager()
 
 memcounter::IMemoryCounter* ::IntrusiveMemoryCounterManagerImplementation::createNewMemoryCounter()
 {
-	if(false) std::cerr << "IntrusiveMemoryCounterManagerImplementation::createNewMemoryCounter() called" << std::endl;
+	if(verbosity_>1) std::cerr << "IntrusiveMemoryCounterManagerImplementation::createNewMemoryCounter() called" << std::endl;
 
 	// Disable memory counting while I do this in case any of my calls create a
 	// recursive loop.
-	pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
+	::RecursiveHookGuard myGuard;
 
-	memcounter::IMemoryCounter* result=getThreadMemoryCounterPool()->createNewMemoryCounter();
-
-	// Put memory counting back on
-	pthread_setspecific( memcounter_threadDisabled, 0 );
-
-	return result;
+	return getThreadMemoryCounterPool()->createNewMemoryCounter();;
 }
 
 void ::IntrusiveMemoryCounterManagerImplementation::addToAllEnabledCountersForCurrentThread( size_t size )
@@ -326,6 +404,11 @@ void ::IntrusiveMemoryCounterManagerImplementation::modifyAllEnabledCountersForC
 void ::IntrusiveMemoryCounterManagerImplementation::removeFromAllEnabledCountersForCurrentThread( size_t size )
 {
 	getThreadMemoryCounterPool()->removeFromAllEnabledCounters( size );
+}
+
+std::vector<memcounter::ICountingInterface*> IntrusiveMemoryCounterManagerImplementation::enabledCounters()
+{
+	return getThreadMemoryCounterPool()->enabledCounters();
 }
 
 inline memcounter::ThreadMemoryCounterPool* ::IntrusiveMemoryCounterManagerImplementation::getThreadMemoryCounterPool()
@@ -344,7 +427,6 @@ memcounter::ThreadMemoryCounterPool* ::IntrusiveMemoryCounterManagerImplementati
 	memcounter::ThreadMemoryCounterPool* pThreadPool=static_cast<memcounter::ThreadMemoryCounterPool*>( pthread_getspecific(keyThreadMemoryCounterPool_) );
 	if( !pThreadPool )
 	{
-		std::cerr << __LINE__ << " - " << __FILE__ << " pthread_self=" << pthread_self() << std::endl;
 		// The ThreadMemoryCounterPool for this thread hasn't been created yet
 		pThreadPool=new memcounter::ThreadMemoryCounterPool;
 		pthread_setspecific(keyThreadMemoryCounterPool_,pThreadPool);
@@ -355,7 +437,6 @@ memcounter::ThreadMemoryCounterPool* ::IntrusiveMemoryCounterManagerImplementati
 			memcounter::MutexSentry mutexSentry( mutex_ );
 			threadPools_.push_back(pThreadPool);
 		}
-		std::cerr << __LINE__ << " - " << __FILE__ << " pthread_self=" << pthread_self() << std::endl;
 	}
 
 	return pThreadPool;
@@ -363,12 +444,13 @@ memcounter::ThreadMemoryCounterPool* ::IntrusiveMemoryCounterManagerImplementati
 
 static void* domalloc( IgHook::SafeData<igprof_domalloc_t> &hook, size_t n )
 {
-	if( memcounter_globallyDisabled || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( n );
+	if( memcounter_globallyDisabled || ::RecursiveHookGuard::internalUsage() || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( n );
 	else
 	{
+		::RecursiveHookGuard myGuard; // This should stop recursive calls of this hook
 
 		// Actually request slightly larger amount of memory
-		void *originalResult=( *hook.chain )( n+sizeof(::FixedMemoryBlockHeader) );
+		void *originalResult=( *hook.chain )( n+sizeof(::TrackedMemoryBlockHeader) );
 		if( originalResult==NULL )
 		{
 			std::cerr << "##### Arghh! Couldn't allocate memory with malloc! #####" << std::endl;
@@ -376,24 +458,23 @@ static void* domalloc( IgHook::SafeData<igprof_domalloc_t> &hook, size_t n )
 		}
 
 		// Store the size data and an identifier so that free knows there's extra data
-		::FixedMemoryBlockHeader* pHeader=(::FixedMemoryBlockHeader*) originalResult;
+		::TrackedMemoryBlockHeader* pHeader=(::TrackedMemoryBlockHeader*) originalResult;
 		void* result=(void*)(pHeader+1);
+		pHeader->pOriginalPtr=originalResult;
+		pHeader->pCountersToNotify=NULL;
 		::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
 
 		pHeader->size=n;
-		*pIdentifier=sizeHasBeenStored;
+		*pIdentifier=trackedSizeHasBeenStored;
 
-
-		if( !memcounter_globallyDisabled && !pthread_getspecific(memcounter_threadDisabled) )
+		std::vector<memcounter::ICountingInterface*> enabledCounters=memcounter::IntrusiveMemoryCounterManager::instance().enabledCounters();
+		if( !enabledCounters.empty() )
 		{
-			// Disable memory counting while I do this in case any of my calls create a
-			// recursive loop. Any non-zero value will do, using this one to avoid casting.
-			pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
-
-			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledCountersForCurrentThread( n );
-
-			// Put memory counting back on
-			pthread_setspecific( memcounter_threadDisabled, 0 );
+			pHeader->pCountersToNotify=new std::vector<memcounter::ICountingInterface*>( enabledCounters );
+			for( std::vector<memcounter::ICountingInterface*>::iterator iCounter=enabledCounters.begin(); iCounter!=enabledCounters.end(); ++iCounter )
+			{
+				(*iCounter)->add(n);
+			}
 		}
 
 		return result;
@@ -402,36 +483,13 @@ static void* domalloc( IgHook::SafeData<igprof_domalloc_t> &hook, size_t n )
 
 static void* docalloc( IgHook::SafeData<igprof_docalloc_t> &hook, size_t num, size_t size )
 {
-	if( memcounter_globallyDisabled || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( num, size );
+	if( true || memcounter_globallyDisabled || ::RecursiveHookGuard::internalUsage() || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( num, size );
 	else
 	{
+		::RecursiveHookGuard myGuard; // This should stop recursive calls of this hook
 
-		// I first need to figure out how many more elements I need to allocate to fit
-		// a MemoryBlockHeader struct in.
-		size_t extraHeaderElements;
-		bool useFixedHeader;
-
-		if( size>sizeof(::VariableMemoryBlockHeader) )
-		{
-			extraHeaderElements=1;
-			useFixedHeader=false;
-		}
-		else
-		{
-			// FixedMemoryBlockHeader is smaller than VariableMemoryBlockHeader, so if a fixed header
-			// can fit I'll use that. It will only work if it fits exactly though.
-			if( size<=sizeof(::FixedMemoryBlockHeader) && sizeof(::FixedMemoryBlockHeader)%size==0 )
-			{
-				extraHeaderElements=sizeof(::FixedMemoryBlockHeader)/size;
-				useFixedHeader=true;
-			}
-			else
-			{
-				extraHeaderElements=sizeof(::VariableMemoryBlockHeader)/size;
-				if( sizeof(::VariableMemoryBlockHeader)%size != 0 ) ++extraHeaderElements; // Always round up
-				useFixedHeader=false;
-			}
-		}
+		size_t extraHeaderElements=sizeof(::TrackedMemoryBlockHeader)/size;
+		if( sizeof(::TrackedMemoryBlockHeader)%size != 0 ) ++extraHeaderElements; // Always round up
 
 		void* originalResult=( *hook.chain )( num+extraHeaderElements, size );
 		if( originalResult==NULL )
@@ -442,36 +500,20 @@ static void* docalloc( IgHook::SafeData<igprof_docalloc_t> &hook, size_t num, si
 
 		// Get a pointer to where the memory after the header elements is
 		void* result=(void*)( ((char*)originalResult) + extraHeaderElements*size );
-		// Now that I have that, take off the size of the header struct so that any
-		// spare space will be at the beginning and the header is right in front of
-		// the memory location I pass back to the caller.
-		if( useFixedHeader )
+
+		::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
+		::TrackedMemoryBlockHeader* pHeader=((::TrackedMemoryBlockHeader*)result)-1;
+		*pIdentifier=trackedSizeHasBeenStored;
+		pHeader->size=num*size;
+		pHeader->pOriginalPtr=originalResult;
+		pHeader->pCountersToNotify=NULL;
+
+
+		memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledCountersForCurrentThread( num*size );
+		std::vector<memcounter::ICountingInterface*> enabledCounters=memcounter::IntrusiveMemoryCounterManager::instance().enabledCounters();
+		if( !enabledCounters.empty() )
 		{
-			::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
-			::FixedMemoryBlockHeader* pHeader=((::FixedMemoryBlockHeader*)result)-1;
-			*pIdentifier=sizeHasBeenStored;
-			pHeader->size=num*size;
-		}
-		else
-		{
-			::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
-			::VariableMemoryBlockHeader* pHeader=((::VariableMemoryBlockHeader*)result)-1;
-			*pIdentifier=variableSizeHasBeenStored;
-			pHeader->size=num*size;
-			pHeader->pOriginalPtr=originalResult;
-		}
-
-
-		if( !memcounter_globallyDisabled && !pthread_getspecific(memcounter_threadDisabled) )
-		{
-			// Disable memory counting while I do this in case any of my calls create a
-			// recursive loop. Any non-zero value will do, using this one to avoid casting.
-			pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
-
-			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledCountersForCurrentThread( num*size );
-
-			// Put memory counting back on
-			pthread_setspecific( memcounter_threadDisabled, 0 );
+			pHeader->pCountersToNotify=new std::vector<memcounter::ICountingInterface*>( enabledCounters );
 		}
 
 		return result;
@@ -480,108 +522,120 @@ static void* docalloc( IgHook::SafeData<igprof_docalloc_t> &hook, size_t num, si
 
 static void* dorealloc( IgHook::SafeData<igprof_dorealloc_t> &hook, void *ptr, size_t n )
 {
-	if( memcounter_globallyDisabled || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( ptr, n );
+	if( ::RecursiveHookGuard::internalUsage() ) return ( *hook.chain )( ptr, n );
+	::RecursiveHookGuard myGuard;
+
+	void* originalPtr;
+	size_t addedSize;
+	::HeaderIdentifier headerIdentifier;
+
+	// Only change the pointer if it's not null.
+	if( ptr==NULL )
+	{
+		originalPtr=ptr;
+		addedSize=0;
+		// Set the header identifier to anything that doesn't match a preset
+		//headerIdentifier={0,0,0,0};
+		headerIdentifier.identifier1=0;
+		headerIdentifier.identifier2=0;
+		headerIdentifier.identifier3=0;
+		headerIdentifier.identifier4=0;
+	}
 	else
 	{
-		void* result; // the return value
+		// Look at the memory just before what the users program thinks the memory
+		// block is. If it's some memory that I've added then there will be a header
+		// identifier there. If not then it's just a standard memory block and ptr
+		// is the correct pointer to it.
+		headerIdentifier=*(((HeaderIdentifier*)ptr)-1);
 
-		if( ptr==NULL )
+		if( headerIdentifier==sizeHasBeenStored )
 		{
-			// If the original ptr is NULL, realloc delegates to malloc which will be
-			// caught by my hook and already have the details put at the start of
-			// the block. My malloc hook will also have already reported the memory
-			// allocation to any active counters, so I can return straight from here.
-			result=( *hook.chain )( ptr, n );
+			::FixedMemoryBlockHeader* pHeader=((FixedMemoryBlockHeader*)ptr)-1;
+			originalPtr=(void*)pHeader;
+			addedSize=sizeof(::FixedMemoryBlockHeader);
+		}
+		else if( headerIdentifier==variableSizeHasBeenStored )
+		{
+			::VariableMemoryBlockHeader* pHeader=((VariableMemoryBlockHeader*)ptr)-1;
+			originalPtr=pHeader->pOriginalPtr;
+			addedSize=sizeof(::VariableMemoryBlockHeader);
+		}
+		else if( headerIdentifier==trackedSizeHasBeenStored )
+		{
+			::TrackedMemoryBlockHeader* pHeader=((TrackedMemoryBlockHeader*)ptr)-1;
+			originalPtr=pHeader->pOriginalPtr;
+			addedSize=sizeof(::TrackedMemoryBlockHeader);
 		}
 		else
 		{
-			void* originalPtr;
-			size_t originalSize;
+			originalPtr=ptr;
+			addedSize=0;
+		}
+	}
 
-			// Only change the pointer if it's not null.
-			::HeaderIdentifier* pIdentifier=((HeaderIdentifier*)ptr)-1;
-			if( *pIdentifier==sizeHasBeenStored )
+	// Request extra memory to store the header at the start of the block
+	void* originalResult=( *hook.chain )( originalPtr, n+addedSize );
+	if( originalResult==NULL )
+	{
+		std::cerr << "##### Arghh! Couldn't allocate memory with realloc! #####" << std::endl;
+		return NULL;
+	}
+
+	void* result; // the return value
+
+	if( headerIdentifier==sizeHasBeenStored )
+	{
+		::FixedMemoryBlockHeader* pHeader=(FixedMemoryBlockHeader*)originalResult;
+		memcounter::IntrusiveMemoryCounterManager::instance().modifyAllEnabledCountersForCurrentThread( pHeader->size, n );
+		pHeader->size=n;
+		result=(void*)(((FixedMemoryBlockHeader*)originalResult)+1);
+	}
+	else if( headerIdentifier==variableSizeHasBeenStored )
+	{
+		::VariableMemoryBlockHeader* pHeader=(VariableMemoryBlockHeader*)originalResult;
+		memcounter::IntrusiveMemoryCounterManager::instance().modifyAllEnabledCountersForCurrentThread( pHeader->size, n );
+		pHeader->size=n;
+		pHeader->pOriginalPtr=originalResult;
+		result=(void*)(((VariableMemoryBlockHeader*)originalResult)+1);
+	}
+	else if( headerIdentifier==trackedSizeHasBeenStored )
+	{
+		::TrackedMemoryBlockHeader* pHeader=(TrackedMemoryBlockHeader*)originalResult;
+		if( pHeader->pCountersToNotify )
+		{
+			for( std::vector<memcounter::ICountingInterface*>::iterator iCounter=pHeader->pCountersToNotify->begin(); iCounter!=pHeader->pCountersToNotify->end(); ++iCounter )
 			{
-				::FixedMemoryBlockHeader* pHeader=((FixedMemoryBlockHeader*)ptr)-1;
-				originalSize=pHeader->size;
-				originalPtr=(void*)pHeader;
-			}
-			else if( *pIdentifier==variableSizeHasBeenStored )
-			{
-				::VariableMemoryBlockHeader* pHeader=((VariableMemoryBlockHeader*)ptr)-1;
-				originalSize=pHeader->size;
-				originalPtr=pHeader->pOriginalPtr;
-			}
-			else
-			{
-				originalPtr=ptr;
-				originalSize=0;
-			}
-
-			// Request extra memory to store the header at the start of the block
-			void* originalResult=( *hook.chain )( originalPtr, n+sizeof(::FixedMemoryBlockHeader) );
-			if( originalResult==NULL )
-			{
-				std::cerr << "##### Arghh! Couldn't allocate memory with realloc! #####" << std::endl;
-				return NULL;
-			}
-
-			// Store the size data and an identifier so that free knows there's extra data
-			::FixedMemoryBlockHeader* pHeader=(FixedMemoryBlockHeader*)originalResult;
-			result=(void*)(((FixedMemoryBlockHeader*)originalResult)+1);
-			pIdentifier=((HeaderIdentifier*)result)-1;
-
-			pHeader->size=n;
-			*pIdentifier=sizeHasBeenStored;
-
-			if( !memcounter_globallyDisabled && !pthread_getspecific(memcounter_threadDisabled) )
-			{
-				// Disable memory counting while I do this in case any of my calls create a
-				// recursive loop. Any non-zero value will do, using this one to avoid casting.
-				pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
-
-				memcounter::IntrusiveMemoryCounterManager::instance().modifyAllEnabledCountersForCurrentThread( originalSize, n );
-
-				// Put memory counting back on
-				pthread_setspecific( memcounter_threadDisabled, 0 );
+				(*iCounter)->modify( pHeader->size, n );
 			}
 		}
 
-		return result;
+		pHeader->size=n;
+		pHeader->pOriginalPtr=originalResult;
+		result=(void*)(((TrackedMemoryBlockHeader*)originalResult)+1);
 	}
+	else result=originalResult;
+
+	return result;
 }
 
 static void* domemalign( IgHook::SafeData<igprof_domemalign_t> &hook, size_t alignment, size_t size )
 {
-	if( memcounter_globallyDisabled || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( alignment, size );
+	if( memcounter_globallyDisabled || ::RecursiveHookGuard::internalUsage() || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( alignment, size );
 	else
 	{
+		::RecursiveHookGuard myGuard;
+
 		// I don't have any programs that use memalign to test with, so I'll warn the user
 		std::cerr << " memcounter warning - you're program uses memalign which should work but hasn't been tested" << "\n";
 
 		size_t alignedHeaderSize; // This is how many multiples of the alignment, not the actual size
-		bool useFixedHeader;
 
-		if( alignment>sizeof(::VariableMemoryBlockHeader) )
-		{
-			alignedHeaderSize=1;
-			useFixedHeader=false;
-		}
+		if( alignment>sizeof(::TrackedMemoryBlockHeader) ) alignedHeaderSize=1;
 		else
 		{
-			// FixedMemoryBlockHeader is smaller than VariableMemoryBlockHeader, so if a fixed header
-			// can fit I'll use that. It will only work if it fits exactly though.
-			if( alignment<=sizeof(::FixedMemoryBlockHeader) && sizeof(::FixedMemoryBlockHeader)%alignment==0 )
-			{
-				alignedHeaderSize=sizeof(::FixedMemoryBlockHeader)/alignment;
-				useFixedHeader=true;
-			}
-			else
-			{
-				alignedHeaderSize=sizeof(::VariableMemoryBlockHeader)/alignment;
-				if( sizeof(::VariableMemoryBlockHeader)%alignment != 0 ) ++alignedHeaderSize; // Always round up
-				useFixedHeader=false;
-			}
+			alignedHeaderSize=sizeof(::TrackedMemoryBlockHeader)/alignment;
+			if( sizeof(::TrackedMemoryBlockHeader)%alignment != 0 ) ++alignedHeaderSize; // Always round up
 		}
 
 		void* originalResult=( *hook.chain )( alignment, size+alignment*alignedHeaderSize );
@@ -596,33 +650,18 @@ static void* domemalign( IgHook::SafeData<igprof_domemalign_t> &hook, size_t ali
 		// Now that I have that, take off the size of the header struct so that any
 		// spare space will be at the beginning and the header is right in front of
 		// the memory location I pass back to the caller.
-		if( useFixedHeader )
+		::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
+		::TrackedMemoryBlockHeader* pHeader=((::TrackedMemoryBlockHeader*)result)-1;
+		*pIdentifier=trackedSizeHasBeenStored;
+		pHeader->size=size;
+		pHeader->pOriginalPtr=originalResult;
+		pHeader->pCountersToNotify=NULL;
+
+		memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledCountersForCurrentThread( size );
+		std::vector<memcounter::ICountingInterface*> enabledCounters=memcounter::IntrusiveMemoryCounterManager::instance().enabledCounters();
+		if( !enabledCounters.empty() )
 		{
-			::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
-			::FixedMemoryBlockHeader* pHeader=((::FixedMemoryBlockHeader*)result)-1;
-			*pIdentifier=sizeHasBeenStored;
-			pHeader->size=size;
-		}
-		else
-		{
-			::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)result)-1;
-			::VariableMemoryBlockHeader* pHeader=((::VariableMemoryBlockHeader*)result)-1;
-			*pIdentifier=variableSizeHasBeenStored;
-			pHeader->size=size;
-			pHeader->pOriginalPtr=originalResult;
-		}
-
-
-		if( !memcounter_globallyDisabled && !pthread_getspecific(memcounter_threadDisabled) )
-		{
-			// Disable memory counting while I do this in case any of my calls create a
-			// recursive loop. Any non-zero value will do, using this one to avoid casting.
-			pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
-
-			memcounter::IntrusiveMemoryCounterManager::instance().addToAllEnabledCountersForCurrentThread( size );
-
-			// Put memory counting back on
-			pthread_setspecific( memcounter_threadDisabled, 0 );
+			pHeader->pCountersToNotify=new std::vector<memcounter::ICountingInterface*>( enabledCounters );
 		}
 
 		return result;
@@ -632,9 +671,11 @@ static void* domemalign( IgHook::SafeData<igprof_domemalign_t> &hook, size_t ali
 
 static void* dovalloc( IgHook::SafeData<igprof_dovalloc_t> &hook, size_t size )
 {
-	if( memcounter_globallyDisabled || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( size );
+	if( memcounter_globallyDisabled || ::RecursiveHookGuard::internalUsage() || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( size );
 	else
 	{
+		::RecursiveHookGuard myGuard;
+
 		// I don't have any programs that use valloc to test with, so I'll warn the user
 		std::cerr << " memcounter warning - you're program uses valloc which should work but hasn't been tested" << "\n";
 
@@ -711,9 +752,11 @@ static void* dovalloc( IgHook::SafeData<igprof_dovalloc_t> &hook, size_t size )
 
 static int dopmemalign( IgHook::SafeData<igprof_dopmemalign_t> &hook, void **ptr, size_t alignment, size_t size )
 {
-	if( memcounter_globallyDisabled || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( ptr, alignment, size );
+	if( memcounter_globallyDisabled || ::RecursiveHookGuard::internalUsage() || pthread_getspecific(memcounter_threadDisabled) ) return ( *hook.chain )( ptr, alignment, size );
 	else
 	{
+		::RecursiveHookGuard myGuard;
+
 		// I don't have any programs that use posix_memalign to test with, so I'll warn the user
 		std::cerr << " memcounter warning - you're program uses posix_memalign which should work but hasn't been tested" << "\n";
 
@@ -792,11 +835,17 @@ static int dopmemalign( IgHook::SafeData<igprof_dopmemalign_t> &hook, void **ptr
 
 static void dofree( IgHook::SafeData<igprof_dofree_t> &hook, void *ptr )
 {
+	if( ::RecursiveHookGuard::internalUsage() ) return ( *hook.chain )( ptr );
+	::RecursiveHookGuard myGuard;
+
 	if( ptr==NULL ) return;
 
 	// Get what the original pointer was before my malloc hook changed it
 	void* originalPtr;
 	size_t originalSize;
+
+	// This is only used if the memory block header is a TrackedMemoryBlockHeader
+	std::auto_ptr< std::vector<memcounter::ICountingInterface*> > pCountersToNotify;
 
 	::HeaderIdentifier* pIdentifier=((::HeaderIdentifier*)ptr)-1;
 	if( *pIdentifier==sizeHasBeenStored )
@@ -811,17 +860,32 @@ static void dofree( IgHook::SafeData<igprof_dofree_t> &hook, void *ptr )
 		originalSize=pHeader->size;
 		originalPtr=pHeader->pOriginalPtr;
 	}
+	else if( *pIdentifier==trackedSizeHasBeenStored )
+	{
+		::TrackedMemoryBlockHeader* pHeader=((::TrackedMemoryBlockHeader*)ptr)-1;
+		originalSize=pHeader->size;
+		originalPtr=pHeader->pOriginalPtr;
+		pCountersToNotify.reset( pHeader->pCountersToNotify );
+	}
 	else // No identifier found, so this allocation wasn't caught by my malloc hooks
 	{
+		pIdentifier=NULL;
 		originalPtr=ptr;
 		originalSize=0;
 	}
 
-	// Pass on to the proper free function
 	( *hook.chain )( originalPtr );
 
-	// Record the free in any active counters
-	if( !memcounter_globallyDisabled && !pthread_getspecific(memcounter_threadDisabled) )
+	// Record the free in any active counters. If the memory header was a TrackedMemoryBlockHeader then the
+	// counters specified should be notified whether they're active or not.
+	if( pCountersToNotify.get()!=NULL )
+	{
+		for( std::vector<memcounter::ICountingInterface*>::iterator iCounter=pCountersToNotify->begin(); iCounter!=pCountersToNotify->end(); ++iCounter )
+		{
+			(*iCounter)->remove( originalSize );
+		}
+	}
+	else if( !memcounter_globallyDisabled && !pthread_getspecific(memcounter_threadDisabled) && originalSize!=0 )
 	{
 		// Disable memory counting while I do this in case any of my calls create a
 		// recursive loop. Any non-zero value will do, using this one to avoid casting.
@@ -857,7 +921,7 @@ static int dopthread_create( IgHook::SafeData<igprof_dopthread_create_t> &hook, 
 	std::cerr << "*** Custom dopthread_create called ***" << std::endl;
 	// Disable memory counting while I do this in case any of my calls create a
 	// recursive loop.
-	pthread_setspecific( memcounter_threadDisabled, &memcounter_globallyDisabled );
+	::RecursiveHookGuard myGuard;
 
 	// I have no guarantee the object will persist until the new thread actually starts to run, so
 	// I'll "new" it here and delete it in my proxy start routine. I don't care about the arg variable
@@ -865,10 +929,5 @@ static int dopthread_create( IgHook::SafeData<igprof_dopthread_create_t> &hook, 
 	// thread.
 	ThreadCreationArguments* pThreadArgs=new ThreadCreationArguments( start_routine, arg );
 
-	int result=hook.chain( thread, attr, &proxyThreadStartRoutine, pThreadArgs );
-
-	// Put memory counting back on
-	pthread_setspecific( memcounter_threadDisabled, 0 );
-
-	return result;
+	return hook.chain( thread, attr, &proxyThreadStartRoutine, pThreadArgs );
 }
