@@ -42,6 +42,7 @@ namespace memcounter
 		void informEnabled( memcounter::ICountingInterface* pEnabledCounter );
 		void informDisabled( memcounter::ICountingInterface* pDisabledCounter );
 
+		std::vector<memcounter::ICountingInterface*> enabledCounters();
 	protected:
 //		std::vector<memcounter::ICountingInterface*> createdCounters_;
 		// I'm having performance issues so currently only using the most recent counter

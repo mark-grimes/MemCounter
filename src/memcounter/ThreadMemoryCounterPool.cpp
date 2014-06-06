@@ -15,10 +15,13 @@ memcounter::ThreadMemoryCounterPool::~ThreadMemoryCounterPool()
 {
 	if(true) std::cout << "Destructing ThreadMemoryCounterPool" << std::endl;
 
-	for( std::vector<memcounter::ICountingInterface*>::iterator iCounter=createdCounters_.begin(); iCounter!=createdCounters_.end(); ++iCounter )
-	{
-		delete *iCounter;
-	}
+	// Getting crashes when I try and use iCounter, so I think the destruction order is messing up.
+	// I think this happens at the end but it's stopping me from getting the logs for my batch jobs.
+	// Until I can figure out a fix I'll just leak the memory.
+//	for( std::vector<memcounter::ICountingInterface*>::iterator iCounter=createdCounters_.begin(); iCounter!=createdCounters_.end(); ++iCounter )
+//	{
+//		delete *iCounter;
+//	}
 }
 
 memcounter::IMemoryCounter* memcounter::ThreadMemoryCounterPool::createNewMemoryCounter()
@@ -75,4 +78,9 @@ void memcounter::ThreadMemoryCounterPool::informDisabled( memcounter::ICountingI
 	if( iFindResult!=enabledCounters_.end() ) enabledCounters_.erase( iFindResult );
 
 	if( enabledCounters_.empty() ) memcounter::disableThisThread();
+}
+
+std::vector<memcounter::ICountingInterface*> memcounter::ThreadMemoryCounterPool::enabledCounters()
+{
+	return std::vector<memcounter::ICountingInterface*>( enabledCounters_.begin(), enabledCounters_.end() );
 }
