@@ -627,7 +627,7 @@ static void* domemalign( IgHook::SafeData<igprof_domemalign_t> &hook, size_t ali
 		::RecursiveHookGuard myGuard;
 
 		// I don't have any programs that use memalign to test with, so I'll warn the user
-		std::cerr << " memcounter warning - you're program uses memalign which should work but hasn't been tested" << "\n";
+		std::cerr << " memcounter warning - your program uses memalign which should work but hasn't been tested" << "\n";
 
 		size_t alignedHeaderSize; // This is how many multiples of the alignment, not the actual size
 
@@ -677,7 +677,7 @@ static void* dovalloc( IgHook::SafeData<igprof_dovalloc_t> &hook, size_t size )
 		::RecursiveHookGuard myGuard;
 
 		// I don't have any programs that use valloc to test with, so I'll warn the user
-		std::cerr << " memcounter warning - you're program uses valloc which should work but hasn't been tested" << "\n";
+		std::cerr << " memcounter warning - your program uses valloc which should work but hasn't been tested" << "\n";
 
 		long alignment=sysconf(_SC_PAGESIZE);
 		size_t alignedHeaderSize; // This is how many multiples of the alignment, not the actual size
@@ -758,7 +758,7 @@ static int dopmemalign( IgHook::SafeData<igprof_dopmemalign_t> &hook, void **ptr
 		::RecursiveHookGuard myGuard;
 
 		// I don't have any programs that use posix_memalign to test with, so I'll warn the user
-		std::cerr << " memcounter warning - you're program uses posix_memalign which should work but hasn't been tested" << "\n";
+		std::cerr << " memcounter warning - your program uses posix_memalign which should work but hasn't been tested" << "\n";
 
 		size_t alignedHeaderSize; // This is how many multiples of the alignment, not the actual size
 		bool useFixedHeader;
