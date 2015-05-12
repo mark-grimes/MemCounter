@@ -8,12 +8,12 @@
 
 memcounter::ThreadMemoryCounterPool::ThreadMemoryCounterPool() //: pLastEnabledCounter_(NULL)
 {
-	if(true) std::cout << "Constructing ThreadMemoryCounterPool" << std::endl;
+	if(true) std::cout << "Constructing ThreadMemoryCounterPool on thread pthread_self=" << pthread_self() << std::endl;
 }
 
 memcounter::ThreadMemoryCounterPool::~ThreadMemoryCounterPool()
 {
-	if(true) std::cout << "Destructing ThreadMemoryCounterPool" << std::endl;
+	if(true) std::cout << "Destructing ThreadMemoryCounterPool on thread pthread_self=" << pthread_self() << std::endl;
 
 	// Getting crashes when I try and use iCounter, so I think the destruction order is messing up.
 	// I think this happens at the end but it's stopping me from getting the logs for my batch jobs.
