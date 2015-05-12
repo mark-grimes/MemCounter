@@ -374,10 +374,12 @@ memcounter::IntrusiveMemoryCounterManager::~IntrusiveMemoryCounterManager()
 	// Delete all of the ThreadMemoryCounterPool objects I've created. This destructor should
 	// only be called at the end of program execution but I might as well tidy up in case I
 	// later put some code in the ThreadMemoryCounterPool destructors.
-	for( std::vector<memcounter::ThreadMemoryCounterPool*>::iterator iPool=threadPools_.begin(); iPool!=threadPools_.end(); ++iPool )
-	{
-		delete *iPool;
-	}
+// Having odd crashes because there appears to be more than one IntrusiveMemoryCounterManagerImplementation being
+// deleted. For now I'll just leak the memory while I'm testing to see what the problem is.
+//	for( std::vector<memcounter::ThreadMemoryCounterPool*>::iterator iPool=threadPools_.begin(); iPool!=threadPools_.end(); ++iPool )
+//	{
+//		delete *iPool;
+//	}
 }
 
 memcounter::IMemoryCounter* ::IntrusiveMemoryCounterManagerImplementation::createNewMemoryCounter()
